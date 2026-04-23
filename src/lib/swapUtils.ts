@@ -60,10 +60,11 @@ export async function executeBuy(
     abi: ROUTER_ABI,
     functionName: 'swapExactETHForTokens',
     args: [amountOutMin, path, account.address, deadline],
-    value: amountInS,
-    maxFeePerGas,
-    maxPriorityFeePerGas
+    value: amountInS
   });
+
+  (request as any).maxFeePerGas = maxFeePerGas;
+  (request as any).maxPriorityFeePerGas = maxPriorityFeePerGas;
 
   const hash = await walletClient.writeContract(request);
   return { hash, expectedOut, amountOutMin };
@@ -103,10 +104,12 @@ export async function executeSell(
       address: tokenAddress,
       abi: ERC20_ABI,
       functionName: 'approve',
-      args: [ROUTER_ADDRESS, amountInToken],
-      maxFeePerGas,
-      maxPriorityFeePerGas
+      args: [ROUTER_ADDRESS, amountInToken]
     });
+    
+    (approveReq as any).maxFeePerGas = maxFeePerGas;
+    (approveReq as any).maxPriorityFeePerGas = maxPriorityFeePerGas;
+    
     const approveHash = await walletClient.writeContract(approveReq);
     await publicClient.waitForTransactionReceipt({ hash: approveHash });
   }
@@ -128,10 +131,11 @@ export async function executeSell(
     address: ROUTER_ADDRESS,
     abi: ROUTER_ABI,
     functionName: 'swapExactTokensForETHSupportingFeeOnTransferTokens',
-    args: [amountInToken, amountOutMin, path, account.address, deadline],
-    maxFeePerGas,
-    maxPriorityFeePerGas
+    args: [amountInToken, amountOutMin, path, account.address, deadline]
   });
+
+  (swapReq as any).maxFeePerGas = maxFeePerGas;
+  (swapReq as any).maxPriorityFeePerGas = maxPriorityFeePerGas;
 
   const hash = await walletClient.writeContract(swapReq);
   return { hash, expectedOut, amountOutMin };
