@@ -140,3 +140,55 @@ export async function executeSell(
   const hash = await walletClient.writeContract(swapReq);
   return { hash, expectedOut, amountOutMin };
 }
+
+export async function checkHoneypot(
+  publicClient: PublicClient,
+  account: PrivateKeyAccount,
+  tokenAddress: `0x${string}`
+): Promise<boolean> {
+  const ROUTER_ADDRESS = process.env.NEXT_PUBLIC_DEX_ROUTER as `0x${string}`;
+  const WRAPPED_NATIVE = process.env.NEXT_PUBLIC_WRAPPED_NATIVE as `0x${string}`;
+  
+  try {
+    // 1. Simulate Buy
+    const amountInS = 10000n; // Tiny amount
+    const path = [WRAPPED_NATIVE, tokenAddress];
+    
+    const amountsOut = await publicClient.readContract({
+      address: ROUTER_ADDRESS,
+      abi: ROUTER_ABI,
+      functionName: 'getAmountsOut',
+      args: [amountInS, path]
+    }) as bigint[];
+    
+    const expectedOut = amountsOut[1];
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 60);
+
+    // Simulate Buy (swapExactETHForTokens)
+    await publicClient.simulateContract({
+      account,
+      address: ROUTER_ADDRESS,
+      abi: ROUTER_ABI,
+      functionName: 'swapExactETHForTokens',
+      args: [0n, path, account.address, deadline],
+      value: amountInS
+    });
+
+    // 2. Simulate Sell
+    // Check if the Router allows calculating the sell path. 
+    // Many honeypots fail here if they override pair reserves or block the path.
+    const sellPath = [tokenAddress, WRAPPED_NATIVE];
+    await publicClient.readContract({
+      address: ROUTER_ADDRESS,
+      abi: ROUTER_ABI,
+      functionName: 'getAmountsOut',
+      args: [expectedOut, sellPath]
+    });
+
+    return false; // NOT a honeypot
+  } catch (e) {
+    console.warn(`Honeypot detected for ${tokenAddress}:`, e);
+    return true; // IS a honeypot
+  }
+}
+
