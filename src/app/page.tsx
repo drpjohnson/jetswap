@@ -7,6 +7,7 @@ import { executeBuy } from "@/lib/swapUtils";
 import { getBurnerClients } from "@/lib/burnerWallet";
 import { parseEther } from "viem";
 import { LiveRadar } from "@/components/LiveRadar";
+import { PositionsPanel } from "@/components/PositionsPanel";
 
 export default function Home() {
   const { burnerAccount, updateBalance } = useWalletStore();
@@ -59,13 +60,8 @@ export default function Home() {
           </div>
           
           {/* POSITIONS PANEL */}
-          <div className="flex flex-col border border-zinc-800 bg-zinc-900 rounded overflow-hidden">
-            <div className="p-2 border-b border-zinc-800 bg-zinc-950">
-              <h2 className="text-zinc-500 text-xs">ACTIVE POSITIONS</h2>
-            </div>
-            <div className="flex-1 p-4 flex items-center justify-center text-zinc-600 text-sm italic">
-              No active positions
-            </div>
+          <div className="h-full">
+            <PositionsPanel />
           </div>
         </div>
 

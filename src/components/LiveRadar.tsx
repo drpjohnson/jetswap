@@ -6,9 +6,10 @@ import { sonic } from "viem/chains";
 import { FACTORY_ABI } from "@/lib/abis";
 import { useRadarStore, RadarPair } from "@/store/useRadarStore";
 
-import { checkHoneypot } from "@/lib/swapUtils";
+import { checkHoneypot, executeBuy } from "@/lib/swapUtils";
 import { getBurnerClients } from "@/lib/burnerWallet";
 import { useWalletStore } from "@/store/useWalletStore";
+import { usePortfolioStore } from "@/store/usePortfolioStore";
 
 const WSS_URL = process.env.NEXT_PUBLIC_SONIC_RPC_WSS || "wss://rpc.soniclabs.com";
 const FACTORY_ADDRESS = process.env.NEXT_PUBLIC_DEX_FACTORY as `0x${string}`;
@@ -46,9 +47,47 @@ function RadarRow({ pair }: { pair: RadarPair }) {
     }
   }, [pair.honeypotStatus, pair.pair, pair.token0, pair.token1, burnerAccount, setHoneypotStatus]);
 
+  const { addPosition } = usePortfolioStore();
+
   const handleSnipe = async () => {
-    // This will be implemented in Phase 5 or triggered directly
-    alert("Snipe function not fully hooked up to portfolio yet!");
+    if (!burnerAccount) return alert("Burner wallet not loaded!");
+    setIsBuying(true);
+    try {
+      const { publicClient, walletClient } = getBurnerClients(burnerAccount);
+      const targetTokenAddress = pair.token0.toLowerCase() === WRAPPED_NATIVE.toLowerCase() ? pair.token1 : pair.token0;
+      
+      const amountInS = 1000000000000000n; // Fixed 0.001 $S snipe for test purposes
+      
+      const { hash, expectedOut } = await executeBuy(
+        publicClient,
+        walletClient,
+        burnerAccount,
+        targetTokenAddress,
+        amountInS,
+        100n // 1% slippage
+      );
+      
+      addPosition({
+        id: hash,
+        token: {
+          address: targetTokenAddress,
+          symbol: 'SNIPED', // Ideally fetched from ERC20, but hardcoded for speed in terminal
+          decimals: 18
+        },
+        amount: expectedOut, // Using expectedOut as estimated received balance
+        entryValueS: amountInS,
+        currentValueS: amountInS,
+        tpPercentage: 10, // 10% auto-TP
+        slPercentage: 5,  // 5% auto-SL
+        status: 'active'
+      });
+      
+    } catch (e: any) {
+      console.error(e);
+      alert(`Snipe Failed: ${e.message}`);
+    } finally {
+      setIsBuying(false);
+    }
   };
 
   return (
