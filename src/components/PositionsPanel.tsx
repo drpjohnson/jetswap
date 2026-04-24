@@ -6,7 +6,9 @@ import { usePortfolioStore, ActivePosition } from "@/store/usePortfolioStore";
 import { useWalletStore } from "@/store/useWalletStore";
 import { getBurnerClients } from "@/lib/burnerWallet";
 import { executeSell } from "@/lib/swapUtils";
+import { executeSolanaSell, getSolanaTokenValue } from "@/lib/pumpUtils";
 import { ROUTER_ABI } from "@/lib/abis";
+import { Connection } from "@solana/web3.js";
 
 const ROUTER_ADDRESS = process.env.NEXT_PUBLIC_DEX_ROUTER as `0x${string}`;
 const WRAPPED_NATIVE = process.env.NEXT_PUBLIC_WRAPPED_NATIVE as `0x${string}`;
@@ -16,18 +18,29 @@ function PositionRow({ pos }: { pos: ActivePosition }) {
   const { burnerAccount, updateBalance } = useWalletStore();
 
   const handleManualSell = async () => {
-    if (!burnerAccount) return;
     updateStatus(pos.id, 'selling');
     try {
-      const { publicClient, walletClient } = getBurnerClients(burnerAccount);
-      const { hash } = await executeSell(
-        publicClient,
-        walletClient,
-        burnerAccount,
-        pos.token.address,
-        pos.amount,
-        100n // 1% slippage for manual sell
-      );
+      let hash;
+      if (pos.network === 'solana') {
+        const { solanaBurnerAccount } = useWalletStore.getState();
+        if (!solanaBurnerAccount) throw new Error("Solana Burner wallet not loaded!");
+        const solanaRpc = process.env.NEXT_PUBLIC_SOLANA_RPC_HTTP || 'https://api.mainnet-beta.solana.com';
+        const connection = new Connection(solanaRpc, 'confirmed');
+        const res = await executeSolanaSell(connection, solanaBurnerAccount, pos.token.address, pos.amount, 200);
+        hash = res.hash;
+      } else {
+        if (!burnerAccount) throw new Error("Sonic Burner wallet not loaded!");
+        const { publicClient, walletClient } = getBurnerClients(burnerAccount);
+        const res = await executeSell(
+          publicClient,
+          walletClient,
+          burnerAccount,
+          pos.token.address as `0x${string}`,
+          pos.amount,
+          100n // 1% slippage for manual sell
+        );
+        hash = res.hash;
+      }
       updateStatus(pos.id, 'sold');
       updateBalance();
       alert(`Manual Sell Tx Sent! Hash: ${hash}`);
@@ -53,9 +66,18 @@ function PositionRow({ pos }: { pos: ActivePosition }) {
       </div>
       
       <div className="flex flex-col text-right">
-        <span className="text-zinc-300 text-xs">Value: {parseFloat(formatEther(pos.currentValueS)).toFixed(6)} $S</span>
+        <span className="text-zinc-300 text-xs">
+          Value: {pos.network === 'solana' 
+            ? (Number(pos.currentValueS) / 1e9).toFixed(6) + ' SOL'
+            : parseFloat(formatEther(pos.currentValueS)).toFixed(6) + ' $S'
+          }
+        </span>
         <span className={`text-xs font-bold ${isProfit ? 'text-emerald-400' : 'text-rose-500'}`}>
-          {isProfit ? '+' : ''}{parseFloat(formatEther(profitLossRaw)).toFixed(6)} $S ({profitLossPercent.toFixed(2)}%)
+          {isProfit ? '+' : ''}
+          {pos.network === 'solana'
+            ? (Number(profitLossRaw) / 1e9).toFixed(6) + ' SOL'
+            : parseFloat(formatEther(profitLossRaw)).toFixed(6) + ' $S'
+          } ({profitLossPercent.toFixed(2)}%)
         </span>
       </div>
       
@@ -84,23 +106,33 @@ export function PositionsPanel() {
   const { burnerAccount, updateBalance } = useWalletStore();
 
   useEffect(() => {
-    if (!burnerAccount) return;
-    const { publicClient, walletClient } = getBurnerClients(burnerAccount);
-
     const interval = setInterval(async () => {
       const activePositions = usePortfolioStore.getState().positions.filter(p => p.status === 'active');
+      const storeState = useWalletStore.getState();
       
       for (const pos of activePositions) {
         try {
-          const path = [pos.token.address, WRAPPED_NATIVE];
-          const amountsOut = await publicClient.readContract({
-            address: ROUTER_ADDRESS,
-            abi: ROUTER_ABI,
-            functionName: 'getAmountsOut',
-            args: [pos.amount, path]
-          }) as bigint[];
+          let currentValueS = 0n;
           
-          const currentValueS = amountsOut[1];
+          if (pos.network === 'solana') {
+            const solanaRpc = process.env.NEXT_PUBLIC_SOLANA_RPC_HTTP || 'https://api.mainnet-beta.solana.com';
+            const connection = new Connection(solanaRpc, 'confirmed');
+            currentValueS = await getSolanaTokenValue(connection, pos.token.address, pos.amount);
+          } else {
+            if (!storeState.burnerAccount) continue;
+            const { publicClient } = getBurnerClients(storeState.burnerAccount);
+            const path = [pos.token.address as `0x${string}`, WRAPPED_NATIVE];
+            const amountsOut = await publicClient.readContract({
+              address: ROUTER_ADDRESS,
+              abi: ROUTER_ABI,
+              functionName: 'getAmountsOut',
+              args: [pos.amount, path]
+            }) as bigint[];
+            currentValueS = amountsOut[1];
+          }
+          
+          if (currentValueS === 0n) continue;
+
           updatePositionValue(pos.id, currentValueS);
 
           // Check TP/SL logic
@@ -111,31 +143,47 @@ export function PositionsPanel() {
           if (profitLossPercent >= pos.tpPercentage || profitLossPercent <= -pos.slPercentage) {
             // Trigger Auto-Sell
             updateStatus(pos.id, 'selling');
-            executeSell(
-              publicClient,
-              walletClient,
-              burnerAccount,
-              pos.token.address,
-              pos.amount,
-              200n // 2% slippage for automated panic sells to ensure execution
-            ).then(({ hash }) => {
-              updateStatus(pos.id, 'sold');
-              updateBalance();
-              console.log(`Auto-Sell Triggered for ${pos.token.symbol}. Hash: ${hash}`);
-            }).catch(e => {
-              console.error(`Auto-Sell failed for ${pos.token.symbol}:`, e);
-              updateStatus(pos.id, 'active');
-            });
+            
+            if (pos.network === 'solana') {
+              if (!storeState.solanaBurnerAccount) throw new Error("No Solana Burner Key");
+              const solanaRpc = process.env.NEXT_PUBLIC_SOLANA_RPC_HTTP || 'https://api.mainnet-beta.solana.com';
+              const connection = new Connection(solanaRpc, 'confirmed');
+              executeSolanaSell(connection, storeState.solanaBurnerAccount, pos.token.address, pos.amount, 200).then(({ hash }) => {
+                updateStatus(pos.id, 'sold');
+                storeState.updateBalance();
+                console.log(`Solana Auto-Sell Triggered for ${pos.token.symbol}. Hash: ${hash}`);
+              }).catch(e => {
+                console.error(`Solana Auto-Sell failed for ${pos.token.symbol}:`, e);
+                updateStatus(pos.id, 'active');
+              });
+            } else {
+              if (!storeState.burnerAccount) throw new Error("No Sonic Burner Key");
+              const { publicClient, walletClient } = getBurnerClients(storeState.burnerAccount);
+              executeSell(
+                publicClient,
+                walletClient,
+                storeState.burnerAccount,
+                pos.token.address as `0x${string}`,
+                pos.amount,
+                200n // 2% slippage for automated panic sells to ensure execution
+              ).then(({ hash }) => {
+                updateStatus(pos.id, 'sold');
+                storeState.updateBalance();
+                console.log(`Sonic Auto-Sell Triggered for ${pos.token.symbol}. Hash: ${hash}`);
+              }).catch(e => {
+                console.error(`Sonic Auto-Sell failed for ${pos.token.symbol}:`, e);
+                updateStatus(pos.id, 'active');
+              });
+            }
           }
         } catch (e) {
-          // getAmountsOut might fail if no liquidity
-          console.warn(`Could not fetch price for ${pos.token.symbol}`);
+          console.warn(`Could not fetch price/sell for ${pos.token.symbol}`, e);
         }
       }
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [burnerAccount, updatePositionValue, updateStatus, updateBalance]);
+  }, [updatePositionValue, updateStatus]);
 
   return (
     <div className="flex flex-col w-full h-full border border-zinc-800 bg-zinc-900 rounded overflow-hidden">

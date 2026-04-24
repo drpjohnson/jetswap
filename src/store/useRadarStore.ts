@@ -1,9 +1,12 @@
 import { create } from 'zustand';
 
 export interface RadarPair {
-  token0: `0x${string}`;
-  token1: `0x${string}`;
-  pair: `0x${string}`;
+  token0: string;
+  token1: string;
+  pair: string;
+  network: 'sonic' | 'solana';
+  name?: string; // for solana tokens
+  symbol?: string; // for solana tokens
   timestamp: number;
   isNew: boolean;
   honeypotStatus: 'pending' | 'safe' | 'honeypot';
@@ -12,8 +15,8 @@ export interface RadarPair {
 interface RadarState {
   pairs: RadarPair[];
   addPair: (pair: Omit<RadarPair, 'isNew' | 'timestamp' | 'honeypotStatus'>) => void;
-  markAsOld: (pairAddress: `0x${string}`) => void;
-  setHoneypotStatus: (pairAddress: `0x${string}`, status: 'safe' | 'honeypot') => void;
+  markAsOld: (pairAddress: string) => void;
+  setHoneypotStatus: (pairAddress: string, status: 'safe' | 'honeypot') => void;
 }
 
 export const useRadarStore = create<RadarState>((set) => ({

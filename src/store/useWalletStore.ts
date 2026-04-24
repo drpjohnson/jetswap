@@ -1,13 +1,23 @@
 import { create } from 'zustand';
 import { type PrivateKeyAccount, formatEther } from 'viem';
 import { getOrCreateBurnerWallet, getBurnerClients } from '@/lib/burnerWallet';
+import { getOrCreateSolanaBurnerWallet } from '@/lib/solanaBurnerWallet';
+import { Connection, PublicKey } from '@solana/web3.js';
+import type { Keypair } from '@solana/web3.js';
 
 interface WalletState {
   burnerAccount: PrivateKeyAccount | null;
   burnerAddress: string | null;
   burnerBalance: string;
-  isLoaded: boolean;
   
+  solanaBurnerAccount: Keypair | null;
+  solanaAddress: string | null;
+  solanaBalance: string;
+
+  isLoaded: boolean;
+  network: 'sonic' | 'solana';
+  
+  setNetwork: (network: 'sonic' | 'solana') => void;
   initBurner: () => void;
   updateBalance: () => Promise<void>;
   withdrawAll: (destination: string) => Promise<void>;
@@ -17,15 +27,30 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   burnerAccount: null,
   burnerAddress: null,
   burnerBalance: "0",
+
+  solanaBurnerAccount: null,
+  solanaAddress: null,
+  solanaBalance: "0",
+
   isLoaded: false,
+  network: 'sonic',
+
+  setNetwork: (network) => {
+    set({ network });
+    get().updateBalance();
+  },
 
   initBurner: () => {
     try {
       if (get().isLoaded) return;
       const account = getOrCreateBurnerWallet();
+      const solAccount = getOrCreateSolanaBurnerWallet();
+      
       set({ 
         burnerAccount: account, 
         burnerAddress: account.address,
+        solanaBurnerAccount: solAccount,
+        solanaAddress: solAccount.publicKey.toBase58(),
         isLoaded: true 
       });
       get().updateBalance();
@@ -35,15 +60,28 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   },
 
   updateBalance: async () => {
-    const { burnerAccount } = get();
-    if (!burnerAccount) return;
+    const state = get();
+    
+    // Fetch Sonic Balance
+    if (state.burnerAccount) {
+      try {
+        const { publicClient } = getBurnerClients(state.burnerAccount);
+        const balanceWei = await publicClient.getBalance({ address: state.burnerAccount.address });
+        set({ burnerBalance: formatEther(balanceWei) });
+      } catch (e) {
+        console.error("Failed to fetch Sonic balance", e);
+      }
+    }
 
-    try {
-      const { publicClient } = getBurnerClients(burnerAccount);
-      const balanceWei = await publicClient.getBalance({ address: burnerAccount.address });
-      set({ burnerBalance: formatEther(balanceWei) });
-    } catch (e) {
-      console.error("Failed to fetch balance", e);
+    // Fetch Solana Balance
+    if (state.solanaAddress) {
+      try {
+        const connection = new Connection(process.env.NEXT_PUBLIC_SOLANA_RPC_HTTP || "https://api.mainnet-beta.solana.com");
+        const balanceLamports = await connection.getBalance(new PublicKey(state.solanaAddress));
+        set({ solanaBalance: (balanceLamports / 1e9).toString() });
+      } catch (e) {
+        console.error("Failed to fetch Solana balance", e);
+      }
     }
   },
 

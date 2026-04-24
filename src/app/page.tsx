@@ -8,6 +8,7 @@ import { getBurnerClients } from "@/lib/burnerWallet";
 import { parseEther } from "viem";
 import { LiveRadar } from "@/components/LiveRadar";
 import { PositionsPanel } from "@/components/PositionsPanel";
+import { SettingsPanel } from "@/components/SettingsPanel";
 
 export default function Home() {
   const { burnerAccount, updateBalance } = useWalletStore();
@@ -48,9 +49,10 @@ export default function Home() {
       <Topbar />
       
       <div className="flex-1 flex flex-col items-center p-4 gap-4 max-w-5xl mx-auto w-full">
-        <div className="text-center my-4">
+        <div className="text-center my-4 w-full">
           <h1 className="text-2xl text-cyan-400 mb-1">[ SONIC DEGEN TERMINAL ]</h1>
-          <p className="text-sm text-zinc-500">Waiting for snipe targets...</p>
+          <p className="text-sm text-zinc-500 mb-6">Waiting for snipe targets...</p>
+          <SettingsPanel />
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full h-full min-h-[500px]">

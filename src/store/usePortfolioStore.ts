@@ -8,6 +8,7 @@ export interface Token {
 
 export interface ActivePosition {
   id: string;
+  network?: 'sonic' | 'solana'; // optional for backwards compatibility with existing state
   token: Token;
   amount: bigint;
   entryValueS: bigint;
